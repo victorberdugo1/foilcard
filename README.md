@@ -1,5 +1,7 @@
 # Foil Card
 
+https://github.com/user-attachments/assets/7643c811-9304-4a87-bfc3-acca016bba34
+
 A 3D collectible card with foil effects, written in C with [raylib](https://www.raylib.com/) and a single GLSL 330 fragment shader.
 
 The card follows the mouse, can be flipped, and changes its look with its rarity. The birds and butterflies on the sides pop out of the card and move with parallax.
@@ -58,4 +60,4 @@ data/
 - The two side strips (magenta) hold the birds and butterflies. They are drawn as separate quads in front of the card, so they appear to float above it.
 - The bottom band (cyan) is the grass, sampled by `groundLayer` in the shader.
 
-![character.png layout](character_limits.png)
+<img src="character_limits.png" alt="character.png layout" width="400">
