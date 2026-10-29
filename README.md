@@ -1,6 +1,6 @@
 # Foil Card
 
-https://github.com/user-attachments/assets/7643c811-9304-4a87-bfc3-acca016bba34
+https://github.com/user-attachments/assets/1fac13e7-2ef3-43a1-ba49-42e34f34beec
 
 A 3D collectible card with foil effects, written in C with [raylib](https://www.raylib.com/) and a single GLSL 330 fragment shader.
 
