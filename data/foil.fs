@@ -12,6 +12,8 @@ uniform float time;
 uniform float burn;
 uniform float rarity;
 uniform float glare;
+uniform float diffraction;
+uniform float tera;
 uniform float edgeOn;
 uniform vec3 layerMap;
 uniform vec4 effects;
@@ -51,6 +53,13 @@ float fbm(vec2 p)
     return 0.5 + sum;
 }
 
+vec2 hash22(vec2 p)
+{
+    vec3 q = fract(vec3(p.xyx)*vec3(0.1031, 0.103, 0.0973));
+    q += dot(q, q.yzx + 33.33);
+    return fract((q.xx + q.yz)*q.zy);
+}
+
 vec4 ringAverage(sampler2D tex, vec2 uv, float radius, int count)
 {
     vec4 sum = vec4(0.0);
@@ -80,6 +89,7 @@ float edgeGlow(vec2 uv)
 
 float sparkleLayer(vec2 uv)
 {
+    if (effects.y <= 0.0) return 0.0;
     mat2 rotation = mat2(0.866, 0.5, -0.5, 0.866);
     vec2 p = rotation*(uv*(3.0 + 1.5*rarity)) + tilt*0.8 + vec2(time*0.25, -time*0.18);
     float seed = fract(sin(dot(floor(p), vec2(12.9898, 78.233)))*43758.5453);
@@ -90,6 +100,7 @@ float sparkleLayer(vec2 uv)
 
 vec3 prismEdge(vec2 uv)
 {
+    if (effects.w <= 0.0) return vec3(0.0);
     vec3 prism = mix(rainbow(uv.y*1.4 - time*0.3 + tilt.x*0.5), vec3(0.45, 1.0, 0.75), 0.35);
     float spine = pow(max(0.0, 1.0 - 2.0*abs(uv.y - 0.5)), 1.5);
     float sides = smoothstep(0.15, 0.33, abs(uv.x - 0.5));
@@ -116,13 +127,125 @@ vec4 groundLayer(vec2 uv)
     return vec4(texel.rgb, texel.a*inStrip);
 }
 
+const vec3 JEWELS[3] = vec3[3](vec3(0.08, 0.5, 1.0), vec3(1.0, 0.1, 0.32), vec3(1.0, 0.7, 0.1));
+
+vec3 jewelTint()
+{
+    float k = fract(time*0.05)*3.0;
+    int i = int(k);
+    return mix(JEWELS[i], JEWELS[(i + 1) % 3], smoothstep(0.6, 1.0, fract(k)));
+}
+
+vec2 facetCell(vec2 p, out float edge, out vec2 offset)
+{
+    vec2 cell = floor(p);
+    vec2 f = fract(p);
+    float nearest = 8.0;
+    float second = 8.0;
+    vec2 id = cell;
+    offset = vec2(0.0);
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            vec2 neighbor = cell + vec2(x, y);
+            vec2 r = vec2(x, y) + hash22(neighbor) - f;
+            float d = dot(r, r);
+            if (d < nearest) {
+                second = nearest;
+                nearest = d;
+                id = neighbor;
+                offset = -r;
+            } else if (d < second) {
+                second = d;
+            }
+        }
+    }
+    edge = sqrt(second) - sqrt(nearest);
+    return id;
+}
+
+float teraFront(vec2 uv)
+{
+    return uv.y + 0.06*sin(uv.x*11.0 + uv.y*5.0) + 0.04*sin(uv.x*23.0 - uv.y*13.0);
+}
+
+float teraThreshold()
+{
+    return mix(1.15, -0.15, tera);
+}
+
+float teraMask(float front)
+{
+    return smoothstep(-0.02, 0.02, front - teraThreshold());
+}
+
+vec3 crystalize(vec2 uv, vec4 texel)
+{
+    vec3 color = texel.rgb;
+    if (tera <= 0.0 || texel.a <= 0.0) return color;
+    float front = teraFront(uv);
+    float band = front - teraThreshold();
+    if (band < -0.15) return color;
+
+    vec3 tint = jewelTint();
+    vec3 light = normalize(vec3(vec2(0.35, -0.5) - 0.9*tilt, 1.0));
+    float edge;
+    vec2 offset;
+    vec2 id = facetCell(uv*10.0, edge, offset);
+    vec2 slopeSeed = hash22(id + 11.0);
+    vec2 glintSeed = hash22(id + 37.0);
+    float bevel = 1.0 - smoothstep(0.0, 0.35, edge);
+    vec3 normal = normalize(vec3(2.2*(slopeSeed - 0.5) + 2.0*offset*bevel, 0.8));
+    float diffuse = max(dot(normal, light), 0.0);
+    float specular = pow(max(dot(normal, normalize(light + vec3(0.0, 0.0, 1.0))), 0.0), 48.0);
+    float twinkle = pow(0.5 + 0.5*sin(time*2.0 + 6.28318*glintSeed.x), 14.0);
+    vec3 irid = rainbow(dot(normal.xy, vec2(1.3, 0.7)) + 0.25*glintSeed.y + dot(tilt, vec2(0.5, 0.35)));
+
+    float innerEdge;
+    vec2 innerOffset;
+    vec2 innerId = facetCell(uv*6.0 + 2.0*tilt + 1.2*normal.xy + vec2(7.3, 2.1), innerEdge, innerOffset);
+    vec2 innerSeed = hash22(innerId + 53.0);
+    float innerBevel = 1.0 - smoothstep(0.0, 0.4, innerEdge);
+    vec3 innerNormal = normalize(vec3(2.4*(innerSeed - 0.5) + 1.6*innerOffset*innerBevel, 0.7));
+    float innerLight = max(dot(innerNormal, normalize(vec3(vec2(-0.4, 0.3) + 0.9*tilt, 1.0))), 0.0);
+    vec3 interior = tint*(0.15 + 1.3*innerLight*innerLight)
+        + 0.3*rainbow(innerSeed.x + dot(tilt, vec2(0.4, 0.3)))*innerBevel
+        + 0.3*tint*(1.0 - smoothstep(0.0, 0.05, innerEdge));
+
+    float shade = 0.55 + 0.9*dot(color, vec3(0.299, 0.587, 0.114));
+    vec3 crystal = interior*shade*(0.45 + 0.75*diffuse);
+    crystal += irid*(0.1 + 0.55*(1.0 - normal.z))*(0.4 + diffuse);
+    crystal += vec3(1.0, 0.97, 0.9)*1.6*specular + mix(irid, vec3(1.0), 0.5)*0.45*twinkle;
+    crystal += mix(tint, vec3(1.0), 0.6)*0.5*(1.0 - smoothstep(0.0, 0.04, edge));
+
+    float flash = exp(-band*band/0.0025)*sin(3.14159*tera);
+    return mix(color, crystal, teraMask(front)) + flash*(0.8 + 0.5*rainbow(front*5.0 - time*0.5));
+}
+
+vec3 teraTint()
+{
+    return mix(jewelTint(), vec3(1.0), 0.45);
+}
+
+float teraAura(vec2 uv, float alpha)
+{
+    if (tera <= 0.0) return 0.0;
+    float mask = teraMask(teraFront(uv));
+    if (mask <= 0.0) return 0.0;
+    float coverage = ringAverage(character, uv, 0.008, 6).a;
+    float edge = pow(4.0*coverage*(1.0 - coverage), 3.0);
+    float halo = 0.2*coverage*(1.0 - alpha);
+    return (0.8*edge + halo)*mask;
+}
+
 vec3 frontColor(vec2 uv, float inside, vec4 frame)
 {
     float tier = rarity*0.5;
     vec3 sky = texture(background, uv + tilt*0.1).rgb;
     vec4 ground = groundLayer(uv);
-    vec4 figure = texture(character, uv - tilt*0.035);
-    vec3 art = mix(mix(sky, ground.rgb, ground.a), figure.rgb, figure.a);
+    vec2 figureUV = uv - tilt*0.035;
+    vec4 figure = texture(character, figureUV);
+    vec3 art = mix(mix(sky, ground.rgb, ground.a), crystalize(figureUV, figure), figure.a);
+    art += teraTint()*teraAura(figureUV, figure.a);
 
     vec3 foil = rainbow(dot(uv, vec2(2.0, 1.0)) + dot(tilt, vec2(1.5, 1.0)));
     float shine = pow(max(0.0, 1.0 - 2.0*length(uv - 0.5 - 0.5*tilt)), 3.0);
@@ -181,8 +304,58 @@ vec3 backColor(vec2 uv)
     return color;
 }
 
+float flare(vec2 p, float wing, float size, float shift)
+{
+    float angle = atan(p.x, p.y);
+    float fanOffset = (angle - wing - shift)/0.32;
+    float upOffset = angle/0.14;
+    float downOffset = (3.14159 - angle)/0.3;
+    float rays = exp(-fanOffset*fanOffset) + exp(-upOffset*upOffset) + 0.45*exp(-downOffset*downOffset);
+    return rays*exp(-length(p)/size);
+}
+
+vec3 cellGlint(vec2 grid, vec2 cell)
+{
+    vec2 seed = hash22(cell);
+    vec2 phaseSeed = hash22(cell + 17.0);
+    vec2 jitter = hash22(cell + 31.0) - 0.5;
+    vec2 p = grid - cell - 0.5 - 0.5*jitter;
+    if (dot(p, p) >= 1.0) return vec3(0.0);
+
+    float phase = time*(0.6 + 1.4*seed.y) + 6.28318*phaseSeed.x + dot(tilt, vec2(4.0, 3.0))*(0.5 + seed.x);
+    float blink = pow(0.5 + 0.5*sin(phase), 6.0);
+    if (blink < 0.004) return vec3(0.0);
+
+    p.x = abs(p.x) + 0.0001;
+    p.y *= mix(1.0, -1.0, step(0.5, phaseSeed.y));
+    float size = (0.16 + 0.16*seed.x)*(0.6 + 0.4*blink);
+    float wing = 0.6 + 0.9*phaseSeed.x;
+
+    vec3 spectrum = vec3(flare(p, wing, size*1.3, -0.24), flare(p, wing, size, 0.0), flare(p, wing, size*0.75, 0.24));
+    vec3 tint = mix(vec3(1.0), mix(vec3(1.0, 0.78, 0.5), vec3(0.6, 0.8, 1.0), step(0.5, seed.y)), 0.6);
+    float core = exp(-dot(p, p)*160.0/(0.5 + 4.0*size)) + 0.35*exp(-length(p)/(0.35*size));
+    float window = 1.0 - smoothstep(0.7, 1.0, length(p));
+    return (1.6*spectrum*tint + 1.2*core)*blink*window*(0.5 + phaseSeed.x);
+}
+
+vec3 diffractionGlints(vec2 uv)
+{
+    if (diffraction <= 0.0) return vec3(0.0);
+    vec2 grid = uv*7.0;
+    vec2 cell = floor(grid);
+    vec3 sum = vec3(0.0);
+    for (int y = -1; y <= 1; y++)
+        for (int x = -1; x <= 1; x++)
+            sum += cellGlint(grid, cell + vec2(x, y));
+    return sum;
+}
+
 vec3 burnColor(vec2 uv, vec3 color, float weight, out float holes)
 {
+    if (burn <= 0.0) {
+        holes = 0.0;
+        return color;
+    }
     float field = smoothstep(0.25, 0.75, fbm(uv*4.0));
     float d = field - mix(-0.1, 1.1, burn);
     float charred = step(d, 0.0);
@@ -196,6 +369,7 @@ vec3 burnColor(vec2 uv, vec3 color, float weight, out float holes)
 
 vec3 mirrorSheen(vec2 uv, vec3 base)
 {
+    if (glare <= 0.0) return base;
     vec2 p = uv*26.0;
     p.x += 0.5*mod(floor(p.y), 2.0);
     vec2 f = fract(p) - 0.5;
@@ -218,9 +392,11 @@ void main()
     float holes;
     if (layerMap.z > 0.0) {
         vec4 texel = texture(texture0, uv);
-        vec3 layerColor = mix(texel.rgb, mirrorSheen(uv, texel.rgb), glare);
+        vec3 crystal = crystalize(uv, texel);
+        float aura = teraAura(uv, texel.a);
+        vec3 layerColor = mix(crystal, mirrorSheen(uv, crystal), glare) + teraTint()*aura;
         layerColor = burnColor(layerMap.xy + layerMap.z*uv, layerColor, 1.0, holes);
-        float layerAlpha = texel.a*(1.0 - holes);
+        float layerAlpha = max(texel.a, clamp(aura, 0.0, 1.0))*(1.0 - holes);
         if (layerAlpha <= 0.0) discard;
         finalColor = vec4(layerColor, layerAlpha);
         return;
@@ -232,18 +408,24 @@ void main()
     float tier = rarity*0.5;
 
     vec3 neon = mix(vec3(1.0, 0.8, 0.2), vec3(0.6, 0.2, 1.0), 0.5 + 0.5*tilt.x);
-    vec3 card = gl_FrontFacing ? frontColor(uv, inside, frame) : backColor(uv);
+    vec3 card;
+    if (gl_FrontFacing) card = frontColor(uv, inside, frame);
+    else card = backColor(uv);
 
     vec3 color = mix(neon, card, body);
     color = mix(color, mirrorSheen(uv, color), glare*body);
     color += effects.z*(0.25 + 0.15*tier)*sweepLight(uv)*vec3(1.0, 0.95, 0.85)*body;
     color += effects.w*prismEdge(uv)*body;
     color += 0.6*effects.y*sparkleLayer(uv)*body;
+    color += diffraction*diffractionGlints(uv)*body;
     color = burnColor(uv, color, body, holes);
 
-    float pulse = 0.7 + 0.3*sin(time*3.0);
-    float glowReach = 0.6*ringAverage(texture0, uv, 0.035, 12).a + 0.4*ringAverage(texture0, uv, 0.08, 12).a*(0.4 + 1.2*length(tilt));
-    float aura = (1.0 - body)*glowReach*pulse*(1.0 - burn)*effects.x;
+    float aura = 0.0;
+    if (effects.x > 0.0) {
+        float pulse = 0.7 + 0.3*sin(time*3.0);
+        float glowReach = 0.6*ringAverage(texture0, uv, 0.035, 12).a + 0.4*ringAverage(texture0, uv, 0.08, 12).a*(0.4 + 1.2*length(tilt));
+        aura = (1.0 - body)*glowReach*pulse*(1.0 - burn)*effects.x;
+    }
     float alpha = max(body*(1.0 - holes), aura);
     if (alpha <= 0.0) discard;
 

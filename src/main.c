@@ -13,27 +13,29 @@
 #define CHECKBOX_STEP 34
 #define BURN_SPEED 0.9f
 #define GLARE_SPEED 4.0f
+#define DIFFRACTION_SPEED 3.0f
+#define TERA_SPEED 0.45f
 #define LAYER_PARALLAX_X 1.2f
 #define LAYER_PARALLAX_Y 0.6f
 #define LAYER_HALF 1.3f
 #define FRONT_DEPTH 0.2f
-#define BIRD_INSET 0.6f
-#define BIRD_DROP 0.3f
+#define COLUMN_INSET 0.6f
+#define COLUMN_DROP 0.15f
 
-typedef enum { FX_AURA, FX_SPARKLE, FX_HOLO, FX_RIM, FX_FLIP, FX_BURN, FX_GLARE, FX_COUNT } Effect;
+typedef enum { FX_AURA, FX_SPARKLE, FX_HOLO, FX_RIM, FX_FLIP, FX_BURN, FX_GLARE, FX_DIFFRACTION, FX_TERA, FX_COUNT } Effect;
 typedef enum { RARITY_NORMAL, RARITY_RARE, RARITY_EPIC, RARITY_LEGENDARY, RARITY_COUNT } Rarity;
-typedef struct { float depth, inset, u0, u1, v0, v1; } Strip;
+typedef struct { float depth, inset, u0, u1, v0, v1; } Column;
 
-static const Strip FRONT_LEFT_STRIP = {FRONT_DEPTH, BIRD_INSET, 0.0f, 0.14f, 0.0f, 0.88f};
-static const Strip FRONT_RIGHT_STRIP = {FRONT_DEPTH, -BIRD_INSET, 0.86f, 1.0f, 0.0f, 0.88f};
+static const Column LEFT_COLUMN = {FRONT_DEPTH, COLUMN_INSET, 0.0f, 0.14f, 0.0f, 0.88f};
+static const Column RIGHT_COLUMN = {FRONT_DEPTH, -COLUMN_INSET, 0.86f, 1.0f, 0.0f, 0.88f};
 
-static const char *EFFECT_NAMES[FX_COUNT] = {"Aura", "Sparkles", "Holo", "Rim", "Flip", "Burn", "Glare"};
+static const char *EFFECT_NAMES[FX_COUNT] = {"Aura", "Sparkles", "Holo", "Rim", "Flip", "Burn", "Glare", "Diffraction", "Terastal"};
 static const char *RARITY_NAMES[RARITY_COUNT] = {"Normal", "Rare", "Epic", "Legendary"};
 static const bool RARITY_EFFECTS[RARITY_COUNT][FX_COUNT] = {
-    [RARITY_NORMAL] = {false, false, false, false, false, false, false},
-    [RARITY_RARE] = {false, true, true, false, false, false, false},
-    [RARITY_EPIC] = {true, true, true, true, false, false, false},
-    [RARITY_LEGENDARY] = {true, true, true, true, false, false, true},
+    [RARITY_NORMAL] = {false, false, false, false, false, false, false, false, false},
+    [RARITY_RARE] = {false, true, true, false, false, false, false, false, false},
+    [RARITY_EPIC] = {true, true, true, true, false, false, false, false, false},
+    [RARITY_LEGENDARY] = {true, true, true, true, false, false, true, false, false},
 };
 
 static Texture2D load_texture(const char *directory, const char *name)
@@ -100,22 +102,22 @@ static void draw_card(Texture2D frame, Vector2 tilt, float flip)
     rlPopMatrix();
 }
 
-static void draw_strip(Shader shader, int mapLoc, Texture2D texture, Vector2 tilt, float flip, Strip strip)
+static void draw_column(Shader shader, int mapLoc, Texture2D texture, Vector2 tilt, float flip, Column column)
 {
-    float x0 = strip.inset - LAYER_HALF + 2.0f * LAYER_HALF * strip.u0;
-    float x1 = strip.inset - LAYER_HALF + 2.0f * LAYER_HALF * strip.u1;
-    float y0 = LAYER_HALF - 2.0f * LAYER_HALF * strip.v1;
-    float y1 = LAYER_HALF - 2.0f * LAYER_HALF * strip.v0;
+    float x0 = column.inset - LAYER_HALF + 2.0f * LAYER_HALF * column.u0;
+    float x1 = column.inset - LAYER_HALF + 2.0f * LAYER_HALF * column.u1;
+    float y0 = LAYER_HALF - 2.0f * LAYER_HALF * column.v1;
+    float y1 = LAYER_HALF - 2.0f * LAYER_HALF * column.v0;
     float map[3] = {
-        (strip.inset - LAYER_HALF + CARD_HALF) / (2.0f * CARD_HALF),
-        0.5f - (LAYER_HALF - BIRD_DROP) / (2.0f * CARD_HALF),
+        (column.inset - LAYER_HALF + CARD_HALF) / (2.0f * CARD_HALF),
+        0.5f - (LAYER_HALF - COLUMN_DROP) / (2.0f * CARD_HALF),
         LAYER_HALF / CARD_HALF,
     };
     BeginShaderMode(shader);
     SetShaderValue(shader, mapLoc, map, SHADER_UNIFORM_VEC3);
     push_card_transform(tilt, flip);
-    rlTranslatef(-tilt.x * strip.depth * LAYER_PARALLAX_X, -tilt.y * strip.depth * LAYER_PARALLAX_Y - BIRD_DROP, strip.depth);
-    draw_quad(texture, x0, y0, x1, y1, strip.u0, strip.u1, strip.v0, strip.v1);
+    rlTranslatef(-tilt.x * column.depth * LAYER_PARALLAX_X, -tilt.y * column.depth * LAYER_PARALLAX_Y - COLUMN_DROP, column.depth);
+    draw_quad(texture, x0, y0, x1, y1, column.u0, column.u1, column.v0, column.v1);
     rlPopMatrix();
     EndShaderMode();
 }
@@ -146,6 +148,8 @@ int main(void)
     int rarityLoc = GetShaderLocation(shader, "rarity");
     int edgeOnLoc = GetShaderLocation(shader, "edgeOn");
     int glareLoc = GetShaderLocation(shader, "glare");
+    int diffractionLoc = GetShaderLocation(shader, "diffraction");
+    int teraLoc = GetShaderLocation(shader, "tera");
     int effectsLoc = GetShaderLocation(shader, "effects");
     int layerMapLoc = GetShaderLocation(shader, "layerMap");
 
@@ -154,7 +158,9 @@ int main(void)
     float flip = 0.0f;
     float burn = 0.0f;
     float glare = 0.0f;
-    Rarity rarity = RARITY_LEGENDARY;
+    float diffraction = 0.0f;
+    float tera = 0.0f;
+    Rarity rarity = RARITY_NORMAL;
     bool enabled[FX_COUNT];
     apply_rarity(enabled, rarity);
 
@@ -171,6 +177,8 @@ int main(void)
         flip = move_toward(flip, enabled[FX_FLIP] ? 1.0f : 0.0f, FLIP_SPEED * delta);
         burn = move_toward(burn, enabled[FX_BURN] ? 1.0f : 0.0f, BURN_SPEED * delta);
         glare = move_toward(glare, enabled[FX_GLARE] ? 1.0f : 0.0f, GLARE_SPEED * delta);
+        diffraction = move_toward(diffraction, enabled[FX_DIFFRACTION] ? 1.0f : 0.0f, DIFFRACTION_SPEED * delta);
+        tera = move_toward(tera, enabled[FX_TERA] ? 1.0f : 0.0f, TERA_SPEED * delta);
         if (IsKeyPressed(KEY_R)) {
             rarity = (Rarity)((rarity + 1) % RARITY_COUNT);
             apply_rarity(enabled, rarity);
@@ -195,6 +203,8 @@ int main(void)
         SetShaderValue(shader, timeLoc, &time, SHADER_UNIFORM_FLOAT);
         SetShaderValue(shader, burnLoc, &burn, SHADER_UNIFORM_FLOAT);
         SetShaderValue(shader, glareLoc, &glare, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(shader, diffractionLoc, &diffraction, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(shader, teraLoc, &tera, SHADER_UNIFORM_FLOAT);
         SetShaderValue(shader, rarityLoc, &rarityValue, SHADER_UNIFORM_FLOAT);
         SetShaderValue(shader, edgeOnLoc, &edgeOn, SHADER_UNIFORM_FLOAT);
         SetShaderValue(shader, effectsLoc, effects, SHADER_UNIFORM_VEC4);
@@ -202,8 +212,8 @@ int main(void)
         draw_card(frame, tilt, flip);
         EndShaderMode();
         if (cosf(yaw) > 0.0f) {
-            draw_strip(shader, layerMapLoc, character, tilt, flip, FRONT_LEFT_STRIP);
-            draw_strip(shader, layerMapLoc, character, tilt, flip, FRONT_RIGHT_STRIP);
+            draw_column(shader, layerMapLoc, character, tilt, flip, LEFT_COLUMN);
+            draw_column(shader, layerMapLoc, character, tilt, flip, RIGHT_COLUMN);
         }
         EndMode3D();
         for (int i = 0; i < FX_COUNT; i++) enabled[i] = checkbox(i, EFFECT_NAMES[i], enabled[i]);
